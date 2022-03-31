@@ -104,8 +104,11 @@ func recognitionQRCode(fileName: URL) -> Bool {
         result += feature.messageString ?? ""
         result += "\n"
     }
-    print("二维码为: \n" + result)
-    paste(text: result)
+
+    if isQRCode {
+        print("二维码为: \n" + result)
+        paste(text: result)
+    }
 
     return isQRCode
 }
