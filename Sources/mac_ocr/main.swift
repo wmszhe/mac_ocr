@@ -3,34 +3,33 @@ import CoreImage
 import Cocoa
 import Vision
 
-// 调用系统OCR和二维码解析
+let screenCapturePath = "/tmp/ocr.png"
+let recognitionLanguages = ["en-US", "zh-CN"]
+let joiner = " "
 
-let tmpPath = "/tmp/ocr.png"
-var recognitionLanguages = ["zh-CN", "en-US"]
-var joiner = " "
-
-
-func doShell(_ command: String) -> String {
+@discardableResult
+func screenCapture(_ command: String) throws -> String {
     let task = Process()
+    let pipe = Pipe()
+
     task.launchPath = "/bin/bash"
     task.arguments = ["-c", command]
-
-    let pipe = Pipe()
     task.standardOutput = pipe
-    task.launch()
+    task.standardError = pipe
+
+    try task.run()
 
     let data = pipe.fileHandleForReading.readDataToEndOfFile()
-    let output: String = NSString(data: data, encoding: String.Encoding.utf8.rawValue)! as String
-
-    return output
+    if let output = String(data: data, encoding: .utf8) {
+        return output
+    } else {
+        throw NSError(domain: "error", code: -1, userInfo: nil)
+    }
 }
 
 func convertCIImageToCGImage(inputImage: CIImage) -> CGImage? {
     let context = CIContext(options: nil)
-    if let cgImage = context.createCGImage(inputImage, from: inputImage.extent) {
-        return cgImage
-    }
-    return nil
+    return context.createCGImage(inputImage, from: inputImage.extent)
 }
 
 func paste(text: String) {
@@ -41,8 +40,7 @@ func paste(text: String) {
 }
 
 func recognizeTextHandler(request: VNRequest, error: Error?) {
-    guard let observations =
-    request.results as? [VNRecognizedTextObservation] else {
+    guard let observations = request.results as? [VNRecognizedTextObservation] else {
         return
     }
     let recognizedStrings = observations.compactMap { observation in
@@ -51,50 +49,42 @@ func recognizeTextHandler(request: VNRequest, error: Error?) {
     }
 
     // Process the recognized strings.
-    let joined = recognizedStrings.joined(separator: joiner)
+    let result = recognizedStrings.joined(separator: joiner)
 
-    print("识别结果: " + joined)
+    print("The text content is: " + result)
 
-    paste(text: joined)
+    paste(text: result)
 }
 
-func detectText(fileName: URL) -> [String]? {
-    if let ciImage = CIImage(contentsOf: fileName) {
-        guard let img = convertCIImageToCGImage(inputImage: ciImage) else {
-            return nil
-        }
-
-        let requestHandler = VNImageRequestHandler(cgImage: img)
-
-        // Create a new request to recognize text.
-        let request = VNRecognizeTextRequest(completionHandler: recognizeTextHandler)
-        request.recognitionLanguages = recognitionLanguages
-
-        do {
-            // Perform the text-recognition request.
-            try requestHandler.perform([request])
-        } catch {
-            print("Unable to perform the requests: \(error).")
-        }
+func detectText(fileName: URL) {
+    guard
+            let ciImage = CIImage(contentsOf: fileName),
+            let img = convertCIImageToCGImage(inputImage: ciImage)
+    else {
+        return
     }
-    return nil
+
+    let requestHandler = VNImageRequestHandler(cgImage: img)
+
+    // Create a new request to recognize text.
+    let request = VNRecognizeTextRequest(completionHandler: recognizeTextHandler)
+    request.recognitionLanguages = recognitionLanguages
+
+    do {
+        // Perform the text-recognition request.
+        try requestHandler.perform([request])
+    } catch {
+        print("Unable to perform the requests: \(error).")
+    }
 }
 
-func recognitionQRCode(fileName: URL) -> Bool {
-    //1. 创建过滤器
+func detectImage(fileName: URL) -> Bool {
     let detector = CIDetector(ofType: CIDetectorTypeQRCode, context: nil, options: nil)
 
-    //2. 获取CIImage
-    guard let ciImage = CIImage(contentsOf: fileName) else {
+    guard let ciImage = CIImage(contentsOf: fileName), let features = detector?.features(in: ciImage) else {
         return false
     }
 
-    //3. 识别二维码
-    guard let features = detector?.features(in: ciImage) else {
-        return false
-    }
-
-    //4. 遍历数组, 获取信息
     var isQRCode = false
     var result = ""
     for feature in features as! [CIQRCodeFeature] {
@@ -106,7 +96,7 @@ func recognitionQRCode(fileName: URL) -> Bool {
     }
 
     if isQRCode {
-        print("二维码为: \n" + result)
+        print("QR code analysis results: " + result)
         paste(text: result)
     }
 
@@ -114,21 +104,23 @@ func recognitionQRCode(fileName: URL) -> Bool {
 }
 
 func main() {
-    // 只支持10.15以上系统
+    // Only support the system above macOS 10.15
     guard #available(OSX 10.15, *) else {
-        print("只支持10.15以上系统")
-        return
+        return print("Only support the system above macOS 10.15")
     }
-    // 截图
-    let _ = doShell("/usr/sbin/screencapture -i " + tmpPath)
-    // 判断是否是二维码，如果是二维码，解析二维码
-    guard recognitionQRCode(fileName: URL(fileURLWithPath: tmpPath)) else {
-        // 如果不是二维码，OCR文本
-        let _ = detectText(fileName: URL(fileURLWithPath: tmpPath))
-        return
+    do {
+        // It must be ensured that the screenshot is preserved successfully
+        try screenCapture("/usr/sbin/screencapture -i " + screenCapturePath)
+        print("screen capture complete, Image preservation location: " + screenCapturePath)
+    } catch {
+        return print("\(error)")
+    }
+
+    // Determine whether the picture contains a QR code, if it contain a QR code, Copy the QR code content to the clipboard
+    guard detectImage(fileName: URL(fileURLWithPath: screenCapturePath)) else {
+        // If do not include QR codes, identify text content and supplement to clipboard
+        return detectText(fileName: URL(fileURLWithPath: screenCapturePath))
     }
 }
 
 main()
-
-

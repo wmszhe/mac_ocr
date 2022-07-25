@@ -2,6 +2,12 @@
 
 调用系统OCR和二维码解析
 
+**感谢raycast团队的review！**
+
+**thanks for raycast team to review code**
+
+**https://github.com/raycast/script-commands/pull/735**
+
 **只支持10.15以上系统**
 
 可直接使用编译好的二进制文件 `mac_ocr`
